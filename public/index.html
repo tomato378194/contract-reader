@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>合同智读</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <div class="hero__text">
+          <p class="eyebrow">Contract Reader</p>
+          <h1>合同智读</h1>
+          <p class="subtitle">
+            仅审核以中国现行法律法规为基础的房屋租赁合同。仅支持上传 <code>.docx</code> 文件，其他合同类型会被退回。
+          </p>
+        </div>
+        <div class="hero__panel">
+          <form id="upload-form" class="upload-card">
+            <label for="contract" class="upload-label">上传房屋租赁合同</label>
+            <input id="contract" name="contract" type="file" accept=".docx" required />
+            <button id="submit-btn" type="submit">开始审核</button>
+            <p class="hint">支持本地启动与 Render 部署，服务端包含健康检查和错误处理。</p>
+          </form>
+          <div id="status" class="status" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section id="result-section" class="results hidden">
+        <div class="grid">
+          <article class="card">
+            <h2>合同基本信息</h2>
+            <div id="basic-info" class="info-list"></div>
+          </article>
+          <article class="card">
+            <h2>建议动作</h2>
+            <div id="suggestion"></div>
+          </article>
+        </div>
+
+        <article class="card">
+          <h2>关键风险提示</h2>
+          <div id="risk-list" class="risk-list"></div>
+        </article>
+
+        <article class="card">
+          <h2>合同原文定位</h2>
+          <div id="paragraphs" class="paragraphs"></div>
+        </article>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

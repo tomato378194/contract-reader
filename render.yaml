@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: contract-intel-reader
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: MAX_FILE_SIZE_MB
+        value: 10
+      - key: UPLOAD_DIR
+        value: uploads

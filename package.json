@@ -1,0 +1,27 @@
+{
+  "name": "contract-intel-reader",
+  "version": "1.0.0",
+  "description": "Node.js web app for reviewing Chinese residential lease contracts in DOCX format.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "check": "node --check src/server.js && node --check src/lib/analyzer.js && node --check src/lib/docx.js"
+  },
+  "keywords": [
+    "contract",
+    "lease",
+    "docx",
+    "nodejs",
+    "render"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "mammoth": "^1.8.0",
+    "multer": "^2.0.2"
+  }
+}
