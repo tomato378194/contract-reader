@@ -1,16 +1,36 @@
+function execPattern(pattern, text) {
+  const flags = pattern.flags.replace(/g/g, "");
+  const regex = new RegExp(pattern.source, flags);
+  return regex.exec(text);
+}
+
+function findFirstMatch(text, patterns) {
+  for (const pattern of patterns) {
+    const match = execPattern(pattern, text);
+    if (match) {
+      return match;
+    }
+  }
+  return null;
+}
+
 function matchParagraph(paragraphs, patterns) {
   for (const paragraph of paragraphs) {
-    for (const pattern of patterns) {
-      if (pattern.test(paragraph.text)) {
-        return paragraph;
-      }
+    const match = findFirstMatch(paragraph.text, patterns);
+    if (match) {
+      return { paragraph, match };
     }
   }
   return null;
 }
 
 function collectParagraphs(paragraphs, patterns) {
-  return paragraphs.filter((paragraph) => patterns.some((pattern) => pattern.test(paragraph.text)));
+  return paragraphs
+    .map((paragraph) => {
+      const match = findFirstMatch(paragraph.text, patterns);
+      return match ? { paragraph, match } : null;
+    })
+    .filter(Boolean);
 }
 
 function snippet(text) {
@@ -20,29 +40,126 @@ function snippet(text) {
   return `${text.slice(0, 80)}...`;
 }
 
-function extractFirstValue(paragraphs, patterns, captureIndex = 1) {
+function cleanValue(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/^[：:\-—\s]+/, "")
+    .trim();
+}
+
+function isHeadingLike(text) {
+  return /^第[一二三四五六七八九十百千零\d]+[条章节款项]\s*[\u4e00-\u9fa5A-Za-z0-9（）()]{0,20}$/.test(text)
+    || /^(租赁期限|租期|租赁地点|房屋地址|房屋坐落|租金|租赁费用)$/.test(text.trim());
+}
+
+function createEvidence(paragraph, quote, startInParagraph = null, endInParagraph = null) {
+  const normalizedQuote = cleanValue(quote || paragraph.text);
+  const start = startInParagraph == null
+    ? paragraph.start
+    : paragraph.start + startInParagraph;
+  const end = endInParagraph == null
+    ? paragraph.end
+    : paragraph.start + endInParagraph;
+
+  return {
+    quote: normalizedQuote,
+    excerpt: snippet(normalizedQuote),
+    start,
+    end,
+    paragraphIndex: paragraph.index
+  };
+}
+
+function createEvidenceFromMatch(paragraph, match, captureIndex = 0) {
+  const value = match[captureIndex] || match[0];
+  const fullMatch = match[0];
+  const fullMatchIndex = match.index ?? paragraph.text.indexOf(fullMatch);
+  const offsetInMatch = fullMatch.indexOf(value);
+  const startInParagraph = fullMatchIndex + Math.max(offsetInMatch, 0);
+  const endInParagraph = startInParagraph + value.length;
+  return createEvidence(paragraph, value, startInParagraph, endInParagraph);
+}
+
+function findSentenceRange(text, start, end) {
+  let left = start;
+  let right = end;
+
+  while (left > 0 && !/[。；\n]/.test(text[left - 1])) {
+    left -= 1;
+  }
+  while (right < text.length && !/[。；\n]/.test(text[right])) {
+    right += 1;
+  }
+
+  return {
+    start: left,
+    end: right
+  };
+}
+
+function createSentenceEvidence(paragraph, match) {
+  const start = match.index ?? paragraph.text.indexOf(match[0]);
+  const end = start + match[0].length;
+  const range = findSentenceRange(paragraph.text, start, end);
+  return createEvidence(paragraph, paragraph.text.slice(range.start, range.end), range.start, range.end);
+}
+
+function notFoundValue() {
+  return {
+    value: "未识别",
+    evidence: null
+  };
+}
+
+function extractFieldValue(paragraphs, options) {
+  const {
+    directPatterns,
+    captureIndex = 1,
+    headingPatterns = [],
+    followPatterns = directPatterns,
+    lookahead = 2
+  } = options;
+
   for (const paragraph of paragraphs) {
-    for (const pattern of patterns) {
-      const match = paragraph.text.match(pattern);
-      if (match && match[captureIndex]) {
+    const match = findFirstMatch(paragraph.text, directPatterns);
+    if (match && cleanValue(match[captureIndex] || match[0])) {
+      return {
+        value: cleanValue(match[captureIndex] || match[0]),
+        evidence: createEvidenceFromMatch(paragraph, match, captureIndex)
+      };
+    }
+  }
+
+  for (let index = 0; index < paragraphs.length; index += 1) {
+    const paragraph = paragraphs[index];
+    if (!headingPatterns.some((pattern) => pattern.test(paragraph.text)) || !isHeadingLike(paragraph.text)) {
+      continue;
+    }
+
+    for (let offset = 1; offset <= lookahead; offset += 1) {
+      const nextParagraph = paragraphs[index + offset];
+      if (!nextParagraph) {
+        break;
+      }
+
+      const match = findFirstMatch(nextParagraph.text, followPatterns);
+      if (match && cleanValue(match[captureIndex] || match[0])) {
         return {
-          value: match[captureIndex].trim(),
-          paragraphId: paragraph.id
+          value: cleanValue(match[captureIndex] || match[0]),
+          evidence: createEvidenceFromMatch(nextParagraph, match, captureIndex)
         };
       }
     }
   }
-  return {
-    value: "未识别",
-    paragraphId: null
-  };
+
+  return notFoundValue();
 }
 
 function detectHouseLeaseContract(fullText) {
   const positiveSignals = [
     /房屋租赁合同/,
     /出租人|承租人/,
-    /租赁期限/,
+    /租赁期限|租期/,
     /租金/,
     /房屋坐落|房屋地址|坐落于/
   ];
@@ -52,16 +169,20 @@ function detectHouseLeaseContract(fullText) {
 }
 
 function locateSubjects(paragraphs) {
-  const lessor = extractFirstValue(paragraphs, [
-    /出租人[（(]甲方[）)]?[:：]?\s*([^，。；]+)/,
-    /甲方[:：]\s*([^，。；]+)/,
-    /出租方[:：]\s*([^，。；]+)/
-  ]);
-  const lessee = extractFirstValue(paragraphs, [
-    /承租人[（(]乙方[）)]?[:：]?\s*([^，。；]+)/,
-    /乙方[:：]\s*([^，。；]+)/,
-    /承租方[:：]\s*([^，。；]+)/
-  ]);
+  const lessor = extractFieldValue(paragraphs, {
+    directPatterns: [
+      /出租人[（(]甲方[）)]?[:：]?\s*([^，。；]+)/,
+      /甲方[:：]\s*([^，。；]+)/,
+      /出租方[:：]\s*([^，。；]+)/
+    ]
+  });
+  const lessee = extractFieldValue(paragraphs, {
+    directPatterns: [
+      /承租人[（(]乙方[）)]?[:：]?\s*([^，。；]+)/,
+      /乙方[:：]\s*([^，。；]+)/,
+      /承租方[:：]\s*([^，。；]+)/
+    ]
+  });
 
   return {
     lessor,
@@ -69,23 +190,68 @@ function locateSubjects(paragraphs) {
   };
 }
 
+function extractLeaseTerm(paragraphs) {
+  const dateRange = /\d{4}年\d{1,2}月\d{1,2}日/;
+  return extractFieldValue(paragraphs, {
+    directPatterns: [
+      new RegExp(`(自${dateRange.source}(?:起)?至${dateRange.source}止)`),
+      /租赁期限[为是:：]?\s*(自[^，。；]*至[^，。；]*止)/,
+      /租赁期限[为是:：]?\s*([^，。；]*(?:年|个月|月|天))/,
+      /租期[为是:：]?\s*(自[^，。；]*至[^，。；]*止)/,
+      /租期[为是:：]?\s*([^，。；]*(?:年|个月|月|天))/,
+      /(期限共计[^，。；]*(?:年|个月|月|天))/,
+      /(租赁期共计[^，。；]*(?:年|个月|月|天))/
+    ],
+    captureIndex: 1,
+    headingPatterns: [/租赁期限/, /租期/],
+    followPatterns: [
+      new RegExp(`(自${dateRange.source}(?:起)?至${dateRange.source}止)`),
+      /(共计[^，。；]*(?:年|个月|月|天))/,
+      /(期限[^，。；]*(?:年|个月|月|天))/,
+      /(租期[^，。；]*(?:年|个月|月|天))/
+    ]
+  });
+}
+
+function extractLocation(paragraphs) {
+  return extractFieldValue(paragraphs, {
+    directPatterns: [
+      /房屋(?:坐落|地址)[于为:：]?\s*([^，。；]+)/,
+      /坐落于\s*([^，。；]+)/,
+      /租赁(?:房屋|场地|标的)(?:位于|地址为?)\s*([^，。；]+)/,
+      /地址为\s*([^，。；]+)/
+    ],
+    headingPatterns: [/房屋坐落/, /房屋地址/, /租赁地点/, /租赁场地/],
+    followPatterns: [
+      /(坐落于[^，。；]+)/,
+      /(位于[^，。；]+)/,
+      /(地址为[^，。；]+)/
+    ]
+  });
+}
+
+function extractRent(paragraphs) {
+  return extractFieldValue(paragraphs, {
+    directPatterns: [
+      /(?:每月|月|每季度|每年)租金[为是:：]?\s*([^，。；]+)/,
+      /租金(?:标准)?[为是:：]?\s*([^，。；]+)/,
+      /租金[^，。；]*人民币\s*([^，。；]+)/
+    ],
+    headingPatterns: [/租金/, /租赁费用/, /付款方式/],
+    followPatterns: [
+      /(人民币[^，。；]+)/,
+      /(每月[^，。；]*元)/,
+      /(每季度[^，。；]*元)/,
+      /(每年[^，。；]*元)/
+    ]
+  });
+}
+
 function buildBasicInfo(paragraphs) {
   const subjects = locateSubjects(paragraphs);
-  const leaseTerm = extractFirstValue(paragraphs, [
-    /(租赁期限[^，。；]*)/,
-    /(租期自[^，。；]*)/,
-    /(自\d{4}年\d{1,2}月\d{1,2}日起至\d{4}年\d{1,2}月\d{1,2}日止)/
-  ]);
-  const location = extractFirstValue(paragraphs, [
-    /(房屋坐落[^，。；]*)/,
-    /(房屋地址[^，。；]*)/,
-    /(坐落于[^，。；]*)/
-  ]);
-  const rent = extractFirstValue(paragraphs, [
-    /(租金[^，。；]*人民币[^，。；]*)/,
-    /(每月租金[^，。；]*)/,
-    /(租金标准[^，。；]*)/
-  ]);
+  const leaseTerm = extractLeaseTerm(paragraphs);
+  const location = extractLocation(paragraphs);
+  const rent = extractRent(paragraphs);
 
   return [
     { label: "合同主体-出租人", ...subjects.lessor },
@@ -94,6 +260,10 @@ function buildBasicInfo(paragraphs) {
     { label: "租赁地点", ...location },
     { label: "租金", ...rent }
   ];
+}
+
+function paragraphEvidence(paragraph, match) {
+  return createSentenceEvidence(paragraph, match);
 }
 
 function evaluatePriorityLease(paragraphs) {
@@ -114,16 +284,13 @@ function evaluatePriorityLease(paragraphs) {
     };
   }
 
-  if (/放弃优先承租/.test(hit.text)) {
+  if (/放弃优先承租/.test(hit.paragraph.text)) {
     return {
       id: "priority-lease",
       severity: "high",
       title: "存在放弃优先承租权表述",
       summary: "合同出现放弃优先承租权字样，续租时可能明显不利于承租人。",
-      evidence: [{
-        paragraphId: hit.id,
-        excerpt: snippet(hit.text)
-      }],
+      evidence: [paragraphEvidence(hit.paragraph, hit.match)],
       recommendation: "建议删除或重新协商该表述，明确承租人在同等条件下的续租优先安排。"
     };
   }
@@ -133,10 +300,7 @@ function evaluatePriorityLease(paragraphs) {
     severity: "low",
     title: "已出现优先承租权相关条款",
     summary: "合同包含优先承租权或同等条件续租安排，但仍应核实通知期限和行权方式是否完整。",
-    evidence: [{
-      paragraphId: hit.id,
-      excerpt: snippet(hit.text)
-    }],
+    evidence: [paragraphEvidence(hit.paragraph, hit.match)],
     recommendation: "检查通知期限、回复期限和同等条件认定标准。"
   };
 }
@@ -146,7 +310,7 @@ function evaluateDepositAndPayment(paragraphs) {
     /押金/,
     /保证金/,
     /租金.*支付/,
-    /押[一二三四五六七八九十].*付[一二三四五六七八九十]/
+    /押[一二三四五六七八九十\d].*付[一二三四五六七八九十\d]/
   ]);
 
   if (!hits.length) {
@@ -160,17 +324,14 @@ function evaluateDepositAndPayment(paragraphs) {
     };
   }
 
-  const strongRisk = hits.find((item) => /押[三四五六七八九十].*付/.test(item.text));
+  const strongRisk = hits.find((item) => /押[三四五六七八九十\d].*付/.test(item.paragraph.text));
   if (strongRisk) {
     return {
       id: "deposit-payment",
       severity: "medium",
       title: "押付周期对承租人负担较重",
       summary: "合同出现较长押付周期或较重预付安排，可能增加资金占压风险。",
-      evidence: [{
-        paragraphId: strongRisk.id,
-        excerpt: snippet(strongRisk.text)
-      }],
+      evidence: [paragraphEvidence(strongRisk.paragraph, strongRisk.match)],
       recommendation: "建议协商缩短预付周期，并明确押金返还触发条件和期限。"
     };
   }
@@ -180,10 +341,7 @@ function evaluateDepositAndPayment(paragraphs) {
     severity: "low",
     title: "已识别租金押付条款",
     summary: "合同包含押金或租金支付条款，但应继续核实返还条件、违约扣减依据是否明确。",
-    evidence: hits.slice(0, 2).map((item) => ({
-      paragraphId: item.id,
-      excerpt: snippet(item.text)
-    })),
+    evidence: hits.slice(0, 2).map((item) => paragraphEvidence(item.paragraph, item.match)),
     recommendation: "重点确认押金返还时间、扣减范围和付款凭证要求。"
   };
 }
@@ -207,17 +365,16 @@ function evaluateDefaultLiability(paragraphs) {
     };
   }
 
-  const unilateral = hits.find((item) => /乙方.*违约|承租人.*违约/.test(item.text) && !/甲方|出租人/.test(item.text));
+  const unilateral = hits.find(
+    (item) => /乙方.*违约|承租人.*违约/.test(item.paragraph.text) && !/甲方|出租人/.test(item.paragraph.text)
+  );
   if (unilateral) {
     return {
       id: "default-liability",
       severity: "medium",
       title: "违约责任可能偏向单方",
       summary: "识别到主要针对承租人的违约责任表述，出租人违约责任可能不足。",
-      evidence: [{
-        paragraphId: unilateral.id,
-        excerpt: snippet(unilateral.text)
-      }],
+      evidence: [paragraphEvidence(unilateral.paragraph, unilateral.match)],
       recommendation: "建议补充出租人逾期交房、权属瑕疵、提前解约等违约责任。"
     };
   }
@@ -227,10 +384,7 @@ function evaluateDefaultLiability(paragraphs) {
     severity: "low",
     title: "已识别违约责任条款",
     summary: "合同包含违约责任安排，建议继续核实双方责任是否对等、解除条件是否清晰。",
-    evidence: hits.slice(0, 2).map((item) => ({
-      paragraphId: item.id,
-      excerpt: snippet(item.text)
-    })),
+    evidence: hits.slice(0, 2).map((item) => paragraphEvidence(item.paragraph, item.match)),
     recommendation: "检查通知整改期限、损失计算口径和解除生效条件。"
   };
 }
@@ -254,17 +408,14 @@ function evaluateLiquidatedDamages(paragraphs) {
     };
   }
 
-  const excessive = hits.find((item) => /30%|50%|双倍|三倍|六个月|12个月/.test(item.text));
+  const excessive = hits.find((item) => /30%|50%|双倍|三倍|六个月|12个月/.test(item.paragraph.text));
   if (excessive) {
     return {
       id: "liquidated-damages",
       severity: "high",
       title: "违约金设置可能明显偏高",
       summary: "合同存在较高比例或倍数化违约金表述，后续可能面临调整争议，也会加重签约风险。",
-      evidence: [{
-        paragraphId: excessive.id,
-        excerpt: snippet(excessive.text)
-      }],
+      evidence: [paragraphEvidence(excessive.paragraph, excessive.match)],
       recommendation: "建议将违约金与实际损失、租金水平和违约情形相匹配，避免明显失衡。"
     };
   }
@@ -274,10 +425,7 @@ function evaluateLiquidatedDamages(paragraphs) {
     severity: "low",
     title: "已识别违约金相关条款",
     summary: "合同包含违约金安排，但仍应核实比例、触发条件和调整空间是否合理。",
-    evidence: hits.slice(0, 2).map((item) => ({
-      paragraphId: item.id,
-      excerpt: snippet(item.text)
-    })),
+    evidence: hits.slice(0, 2).map((item) => paragraphEvidence(item.paragraph, item.match)),
     recommendation: "检查违约金触发场景是否明确，并评估是否与实际损失大体相称。"
   };
 }
@@ -306,10 +454,7 @@ function evaluateOwnership(paragraphs) {
     severity: "low",
     title: "已识别出租权属相关条款",
     summary: "合同包含房屋权属或有权出租表述，可进一步核验附件证明材料是否齐备。",
-    evidence: [{
-      paragraphId: hit.id,
-      excerpt: snippet(hit.text)
-    }],
+    evidence: [paragraphEvidence(hit.paragraph, hit.match)],
     recommendation: "核验房产证、不动产权证或授权文件与合同主体是否一致。"
   };
 }
@@ -340,7 +485,7 @@ function decideAction(risks, basicInfo) {
 
 function analyzeLeaseContract(doc) {
   const paragraphs = doc.paragraphs || [];
-  const fullText = paragraphs.map((item) => item.text).join("\n");
+  const fullText = doc.fullText || paragraphs.map((item) => item.text).join("\n\n");
 
   if (!detectHouseLeaseContract(fullText)) {
     return {
@@ -364,6 +509,7 @@ function analyzeLeaseContract(doc) {
     accepted: true,
     scope: "仅限中国房屋租赁合同审核",
     legalBasis: "基于中国现行法律法规的一般性合同审阅规则生成，结果不构成正式法律意见。",
+    fullText,
     basicInfo,
     risks,
     suggestion

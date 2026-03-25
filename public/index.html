@@ -24,20 +24,15 @@
             <p class="hint">支持本地启动与 Render 部署，服务端包含健康检查和错误处理。</p>
           </form>
           <div id="status" class="status" aria-live="polite"></div>
+          <div id="suggestion" class="review-summary hidden"></div>
         </div>
       </section>
 
       <section id="result-section" class="results hidden">
-        <div class="grid">
-          <article class="card">
-            <h2>合同基本信息</h2>
-            <div id="basic-info" class="info-list"></div>
-          </article>
-          <article class="card">
-            <h2>建议动作</h2>
-            <div id="suggestion"></div>
-          </article>
-        </div>
+        <article class="card">
+          <h2>合同基本信息</h2>
+          <div id="basic-info" class="info-list"></div>
+        </article>
 
         <article class="card">
           <h2>关键风险提示</h2>
@@ -45,8 +40,8 @@
         </article>
 
         <article class="card">
-          <h2>合同原文定位</h2>
-          <div id="paragraphs" class="paragraphs"></div>
+          <h2>合同原文引用</h2>
+          <div id="contract-text" class="contract-text"></div>
         </article>
       </section>
     </main>

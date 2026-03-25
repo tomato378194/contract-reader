@@ -17,11 +17,24 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "..", "public")));
 
+function decodeUploadName(name) {
+  try {
+    const decoded = Buffer.from(name, "latin1").toString("utf8");
+    if (/[\u00C0-\u00FF]/.test(name) && /[\u4e00-\u9fa5]/.test(decoded)) {
+      return decoded;
+    }
+    return name;
+  } catch (_error) {
+    return name;
+  }
+}
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
   filename: (_req, file, cb) => {
+    const originalName = decodeUploadName(file.originalname);
     const safeBase = path
-      .basename(file.originalname, path.extname(file.originalname))
+      .basename(originalName, path.extname(originalName))
       .replace(/[^\w\u4e00-\u9fa5-]+/g, "_")
       .slice(0, 60);
     cb(null, `${Date.now()}-${safeBase || "contract"}.docx`);
@@ -61,6 +74,7 @@ app.post("/api/review", upload.single("contract"), async (req, res, next) => {
   }
 
   try {
+    const originalName = decodeUploadName(req.file.originalname);
     const doc = await extractDocxParagraphs(req.file.path);
     const analysis = analyzeLeaseContract(doc);
 
@@ -68,15 +82,14 @@ app.post("/api/review", upload.single("contract"), async (req, res, next) => {
       res.status(400).json({
         error: analysis.reasonCode,
         message: analysis.reason,
-        paragraphs: doc.paragraphs
+        fullText: doc.fullText
       });
       return;
     }
 
     res.json({
-      fileName: req.file.originalname,
+      fileName: originalName,
       ...analysis,
-      paragraphs: doc.paragraphs,
       generatedAt: new Date().toISOString()
     });
   } catch (error) {
