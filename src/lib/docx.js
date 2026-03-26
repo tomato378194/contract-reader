@@ -6,12 +6,22 @@ function normalizeParagraphs(rawText) {
     .map((item) => item.replace(/\s+/g, " ").trim())
     .filter(Boolean);
 
+  let cursor = 0;
+
   return {
-    paragraphs: lines.map((text, index) => ({
-      id: `p-${index + 1}`,
-      index: index + 1,
-      text
-    })),
+    paragraphs: lines.map((text, index) => {
+      const start = cursor;
+      const end = start + text.length;
+      cursor = end + 2;
+
+      return {
+        id: `p-${index + 1}`,
+        index: index + 1,
+        text,
+        start,
+        end
+      };
+    }),
     fullText: lines.join("\n\n")
   };
 }

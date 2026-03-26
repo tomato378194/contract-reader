@@ -47,20 +47,59 @@ function snippet(text) {
   return `${normalized.slice(0, 90)}...`;
 }
 
-function createEvidence(paragraph, quote) {
+function findSentenceRange(text, start, end) {
+  let left = start;
+  let right = end;
+
+  while (left > 0 && !/[。；;\n]/.test(text[left - 1])) {
+    left -= 1;
+  }
+
+  while (right < text.length && !/[。；;\n]/.test(text[right])) {
+    right += 1;
+  }
+
+  return { start: left, end: right };
+}
+
+function createEvidence(paragraph, quote, startInParagraph = null, endInParagraph = null) {
   if (!paragraph) {
     return null;
   }
 
+  const normalizedQuote = cleanValue(quote || paragraph.text);
+  const start = typeof paragraph.start === "number"
+    ? (startInParagraph == null ? paragraph.start : paragraph.start + startInParagraph)
+    : null;
+  const end = typeof paragraph.start === "number"
+    ? (endInParagraph == null ? paragraph.end : paragraph.start + endInParagraph)
+    : null;
+
   return {
-    quote: cleanValue(quote || paragraph.text),
-    excerpt: snippet(quote || paragraph.text),
-    paragraphIndex: paragraph.index
+    quote: normalizedQuote,
+    excerpt: snippet(normalizedQuote),
+    paragraphIndex: paragraph.index,
+    start,
+    end
   };
 }
 
 function createEvidenceFromMatch(paragraph, match, captureIndex = 0) {
-  return createEvidence(paragraph, match[captureIndex] || match[0]);
+  const value = match[captureIndex] || match[0];
+  const fullMatch = match[0];
+  const fullMatchIndex = match.index ?? paragraph.text.indexOf(fullMatch);
+  const offsetInMatch = fullMatch.indexOf(value);
+  const startInParagraph = fullMatchIndex + Math.max(offsetInMatch, 0);
+  const endInParagraph = startInParagraph + value.length;
+
+  return createEvidence(paragraph, value, startInParagraph, endInParagraph);
+}
+
+function createSentenceEvidence(paragraph, match) {
+  const start = match.index ?? paragraph.text.indexOf(match[0]);
+  const end = start + match[0].length;
+  const range = findSentenceRange(paragraph.text, start, end);
+  return createEvidence(paragraph, paragraph.text.slice(range.start, range.end), range.start, range.end);
 }
 
 function notFoundValue() {
@@ -148,16 +187,32 @@ function locateSubjects(paragraphs) {
   const lessor = extractFieldValue(paragraphs, {
     directPatterns: [
       /(?:甲方|出租方|出租人)\s*[:：]\s*([^\n，。；;]+)/,
+      /(?:甲方|出租方|出租人)\s*[（(][^)）]{0,8}[）)]\s*[:：]?\s*([^\n，。；;]+)/,
+      /出租方\s*(?:信息)?\s*[:：]?\s*([^\n，。；;]+)/,
       /出租方\s*（?甲方）?\s*[:：]?\s*([^\n，。；;]+)/,
-      /出租人信息\s*[:：]?\s*([^\n，。；;]+)/
+      /出租人信息\s*[:：]?\s*([^\n，。；;]+)/,
+      /甲方\s*([^\n，。；;]{2,30})/
+    ],
+    headingPatterns: [/^甲方$/, /^出租方$/, /^出租人$/, /出租方信息/, /出租人信息/],
+    followPatterns: [
+      /^([^\n，。；;]{2,30})$/,
+      /([^\n，。；;]{2,30})/
     ]
   });
 
   const lessee = extractFieldValue(paragraphs, {
     directPatterns: [
       /(?:乙方|承租方|承租人)\s*[:：]\s*([^\n，。；;]+)/,
+      /(?:乙方|承租方|承租人)\s*[（(][^)）]{0,8}[）)]\s*[:：]?\s*([^\n，。；;]+)/,
+      /承租方\s*(?:信息)?\s*[:：]?\s*([^\n，。；;]+)/,
       /承租方\s*（?乙方）?\s*[:：]?\s*([^\n，。；;]+)/,
-      /承租人信息\s*[:：]?\s*([^\n，。；;]+)/
+      /承租人信息\s*[:：]?\s*([^\n，。；;]+)/,
+      /乙方\s*([^\n，。；;]{2,30})/
+    ],
+    headingPatterns: [/^乙方$/, /^承租方$/, /^承租人$/, /承租方信息/, /承租人信息/],
+    followPatterns: [
+      /^([^\n，。；;]{2,30})$/,
+      /([^\n，。；;]{2,30})/
     ]
   });
 
@@ -299,7 +354,7 @@ function evaluateDepositAndPayment(paragraphs) {
       title: "预付周期较长",
       summary: "合同中存在较长周期预付安排，可能增加承租方的资金占压和退款协调成本。",
       recommendation: "建议缩短预付周期，并明确押金返还时间及扣减依据。",
-      evidence: [createEvidence(heavyPrepay.paragraph)]
+      evidence: [createSentenceEvidence(heavyPrepay.paragraph, heavyPrepay.match)]
     };
   }
 
@@ -309,7 +364,7 @@ function evaluateDepositAndPayment(paragraphs) {
     title: "已识别押金和付款条款",
     summary: "合同已包含押金或付款安排，但仍应核对押金返还条件和付款凭证要求。",
     recommendation: "建议确认押金返还时点、扣减范围和租金支付留痕方式。",
-    evidence: hits.slice(0, 2).map((item) => createEvidence(item.paragraph))
+    evidence: hits.slice(0, 2).map((item) => createSentenceEvidence(item.paragraph, item.match))
   };
 }
 
@@ -343,7 +398,7 @@ function evaluateDefaultLiability(paragraphs) {
       title: "违约责任可能偏向单方",
       summary: "识别到主要针对承租方的违约表述，出租方对应责任可能不够完整，存在责任不对等风险。",
       recommendation: "建议补充出租方迟延交房、权属瑕疵、提前解约等违约责任。",
-      evidence: [createEvidence(unilateral.paragraph)]
+      evidence: [createSentenceEvidence(unilateral.paragraph, unilateral.match)]
     };
   }
 
@@ -353,7 +408,7 @@ function evaluateDefaultLiability(paragraphs) {
     title: "已识别违约责任条款",
     summary: "合同包含违约和解除安排，但仍建议核对双方责任是否对等、触发条件是否清晰。",
     recommendation: "重点检查整改期限、损失计算方式和解除生效条件。",
-    evidence: hits.slice(0, 2).map((item) => createEvidence(item.paragraph))
+    evidence: hits.slice(0, 2).map((item) => createSentenceEvidence(item.paragraph, item.match))
   };
 }
 
@@ -384,7 +439,7 @@ function evaluateLiquidatedDamages(paragraphs) {
       title: "违约金设置可能偏高",
       summary: "合同中存在较高比例或倍数化违约金表述，后续可能引发调减争议，也会增加签约风险。",
       recommendation: "建议使违约金与实际损失、租金水平和违约情形相匹配，避免明显失衡。",
-      evidence: [createEvidence(excessive.paragraph)]
+      evidence: [createSentenceEvidence(excessive.paragraph, excessive.match)]
     };
   }
 
@@ -394,7 +449,7 @@ function evaluateLiquidatedDamages(paragraphs) {
     title: "已识别违约金条款",
     summary: "合同包含违约金约定，但仍建议复核比例、触发条件和调整空间是否合理。",
     recommendation: "建议核对违约金触发场景，并评估是否与实际损失大致相称。",
-    evidence: hits.slice(0, 2).map((item) => createEvidence(item.paragraph))
+    evidence: hits.slice(0, 2).map((item) => createSentenceEvidence(item.paragraph, item.match))
   };
 }
 
@@ -597,7 +652,7 @@ function decideAction(riskReview, legalReview, basicInfo) {
 function analyzeLeaseContract(doc) {
   try {
     const paragraphs = Array.isArray(doc?.paragraphs) ? doc.paragraphs : [];
-    const fullText = cleanValue(doc?.fullText || paragraphs.map((item) => item.text).join("\n"));
+    const fullText = String(doc?.fullText || paragraphs.map((item) => item.text).join("\n\n"));
 
     if (!paragraphs.length || !fullText) {
       return {
@@ -624,6 +679,7 @@ function analyzeLeaseContract(doc) {
       accepted: true,
       scope: "仅限中国房屋租赁合同审查",
       legalDisclaimer: "以下结果基于规则识别生成，仅用于合同初步筛查，不构成正式法律意见。",
+      fullText,
       basicInfo,
       riskReview,
       legalReview,
