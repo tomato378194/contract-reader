@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>合同智读V2</title>
+    <title>合同智读 V4</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -11,17 +11,17 @@
       <section class="hero">
         <div class="hero__text">
           <p class="eyebrow">Contract Reader</p>
-          <h1>合同智读V2</h1>
+          <h1>合同智读 V4</h1>
           <p class="subtitle">
-            仅审核以中国现行法律法规为基础的房屋租赁合同。仅支持上传 <code>.docx</code> 文件，其他合同类型会被退回。
+            面向中国房屋租赁合同的基础审查工具。当前仅支持上传 <code>.docx</code> 文件，聚焦可靠性、风险提示和法律依据有效性检查。
           </p>
         </div>
         <div class="hero__panel">
           <form id="upload-form" class="upload-card">
             <label for="contract" class="upload-label">上传房屋租赁合同</label>
             <input id="contract" name="contract" type="file" accept=".docx" required />
-            <button id="submit-btn" type="submit">开始审核</button>
-            <p class="hint">支持本地启动与 Render 部署，服务端包含健康检查和错误处理。</p>
+            <button id="submit-btn" type="submit" disabled data-idle-text="开始审查" data-loading-text="审查中...">开始审查</button>
+            <p class="hint">仅支持 DOCX，系统会自动校验文件格式、空文件和基础法律引用有效性。</p>
           </form>
           <div id="status" class="status" aria-live="polite"></div>
           <div id="suggestion" class="review-summary hidden"></div>
@@ -30,18 +30,34 @@
 
       <section id="result-section" class="results hidden">
         <article class="card">
-          <h2>合同基本信息</h2>
+          <h2>基本信息</h2>
           <div id="basic-info" class="info-list"></div>
         </article>
 
         <article class="card">
-          <h2>关键风险提示</h2>
-          <div id="risk-list" class="risk-list"></div>
+          <h2>风险提示</h2>
+          <p id="risk-summary" class="section-summary"></p>
+          <div class="risk-group">
+            <h3>高风险</h3>
+            <div id="risk-high-list" class="risk-list"></div>
+          </div>
+          <div class="risk-group">
+            <h3>建议优化</h3>
+            <div id="risk-optimize-list" class="risk-list"></div>
+          </div>
         </article>
 
         <article class="card">
-          <h2>合同原文引用</h2>
-          <div id="contract-text" class="contract-text"></div>
+          <h2>法律依据审查</h2>
+          <p id="legal-summary" class="section-summary"></p>
+          <div class="risk-group">
+            <h3>识别到的法律依据</h3>
+            <div id="law-reference-list" class="info-list"></div>
+          </div>
+          <div class="risk-group">
+            <h3>法律风险提示</h3>
+            <div id="law-risk-list" class="risk-list"></div>
+          </div>
         </article>
       </section>
     </main>
